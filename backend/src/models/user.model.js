@@ -1,13 +1,13 @@
 // backend/src/models/user.model.js
 const { getPool } = require('../config/db');
 
-async function createUser({ name, email, password }) {
+async function createUser({ name = null, email, password }) {
   const pool = getPool();
-  const result = await pool.query(
-    `INSERT INTO users (name, email, password) VALUES ($1, $2, $3) RETURNING id, name, email`,
-    [name || null, email, password]
+  const res = await pool.query(
+    `INSERT INTO users (name, email, password) VALUES ($1, $2, $3) RETURNING id, name, email, created_at`,
+    [name, email, password]
   );
-  return result.rows[0];
+  return res.rows[0];
 }
 
 async function findUserByEmail(email) {
@@ -16,4 +16,10 @@ async function findUserByEmail(email) {
   return res.rows[0] || null;
 }
 
-module.exports = { createUser, findUserByEmail };
+async function findUserById(id) {
+  const pool = getPool();
+  const res = await pool.query(`SELECT id, name, email, created_at FROM users WHERE id = $1 LIMIT 1`, [id]);
+  return res.rows[0] || null;
+}
+
+module.exports = { createUser, findUserByEmail, findUserById };
