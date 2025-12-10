@@ -1,0 +1,23 @@
+{
+  "name": "shopify-wa-automation",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "backend",
+    "frontend",
+    "ai",
+    "whatsapp"
+  ],
+  "scripts": {
+    "install-all": "npm install --workspaces",
+    "dev": "concurrently \"npm:dev:*\"",
+    "dev:backend": "npm --workspace backend run dev",
+    "dev:frontend": "npm --workspace frontend run dev",
+    "dev:ai": "npm --workspace ai run dev",
+    "dev:whatsapp": "npm --workspace whatsapp run dev",
+    "lint": "echo \"add lint scripts per package\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.0"
+  }
+}
