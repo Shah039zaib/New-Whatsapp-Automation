@@ -1,0 +1,12 @@
+{
+  "name": "shopify-wa-whatsapp",
+  "version": "0.1.0",
+  "main": "client.js",
+  "scripts": {
+    "dev": "node client.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.0.0",
+    "pino": "^8.8.0"
+  }
+}
