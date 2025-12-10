@@ -2,7 +2,7 @@
 require('dotenv').config();
 const path = require('path');
 const pino = require('pino');
-const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, makeCacheStore, DisconnectReason, useSingleFileAuthState } = require('@adiwajshing/baileys');
+const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion } = require('@adiwajshing/baileys');
 const { attachQrSocket, emitQrEvent } = require('./qr/qrServer');
 const SessionStore = require('./sessions/sessionStore');
 const { onMessageUpsert, emitter } = require('./handlers/messageHandler');
@@ -15,7 +15,7 @@ class WhatsAppManager {
   constructor({ httpServer = null } = {}) {
     this.sessionStore = new SessionStore();
     this.rateLimiter = new RateLimiter();
-    this.clients = new Map(); // accountId -> { conn, state }
+    this.clients = new Map(); // accountId -> { conn, accountId }
     this.httpServer = httpServer;
     if (httpServer) {
       this.io = attachQrSocket(httpServer);
@@ -81,8 +81,6 @@ class WhatsAppManager {
       onMessageUpsert(conn, m, accountId, logger).catch(e => logger.error(e, 'message handler failed'));
     });
 
-    // keep client reference
-    // return object
     return { conn, accountId, authPath };
   }
 
@@ -127,7 +125,8 @@ class WhatsAppManager {
     const fn = async () => {
       const fs = require('fs');
       const stream = fs.createReadStream(filePath);
-      return entry.conn.sendMessage(jid, { [mimetype && mimetype.startsWith('image') ? 'image' : 'document']: { stream, mimetype }, caption });
+      const key = (mimetype && mimetype.startsWith('image')) ? 'image' : 'document';
+      return entry.conn.sendMessage(jid, { [key]: { stream, mimetype }, caption });
     };
     return this.rateLimiter.schedule(accountId, fn);
   }
