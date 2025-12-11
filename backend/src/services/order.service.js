@@ -1,29 +1,48 @@
 // backend/src/services/order.service.js
 const orderModel = require('../models/order.model');
 const orderItemModel = require('../models/orderItem.model');
-const chatService = require('./chat.service'); // uses previously created chat.service
+const chatService = require('./chat.service');
+const pkgModel = require('../models/package.model'); // ensure path exists
 
-/**
- * createOrderFromChat
- * payload example:
- * {
- *   jid: "923xxxxxxxxx@s.whatsapp.net",
- *   user_id: 1, // optional (admin/user)
- *   items: [{ product_id, title, quantity, unit_price }]
- *   metadata: { ... }
- * }
- */
+async function resolvePackagePrice(titleOrSlug) {
+  if (!titleOrSlug) return null;
+  // try slug then title
+  let pkg = await pkgModel.findPackageBySlug(titleOrSlug).catch(()=>null);
+  if (!pkg) {
+    // try by title case-insensitive
+    const pool = require('../config/db').getPool();
+    const res = await pool.query('SELECT * FROM packages WHERE lower(title) = $1 LIMIT 1', [String(titleOrSlug).toLowerCase()]);
+    pkg = res.rows[0] || null;
+  }
+  return pkg;
+}
+
 async function createOrderFromChat({ jid, user_id = null, items = [], metadata = {}, external_order_id = null }) {
-  // ensure chat exists and get chat
+  // ensure chat exists
   const { chat } = await chatService.storeIncoming({ accountId: null, message: { jid, text: null }, raw: null }).catch(()=>({ chat: null }));
   const chatId = chat?.id || null;
 
-  // compute total
+  // resolve items and compute total
   let total = 0;
+  const resolvedItems = [];
+
   for (const it of items) {
+    let unit_price = Number(it.unit_price || 0);
+    let title = it.title || it.product_id || null;
+
+    if ((!unit_price || unit_price === 0) && title) {
+      // try resolve package by title/slug
+      const pkg = await resolvePackagePrice(title);
+      if (pkg) {
+        unit_price = Number(pkg.price || 0);
+        title = pkg.title;
+      }
+    }
+
     const q = Number(it.quantity || 1);
-    const p = Number(it.unit_price || 0);
-    total += q * p;
+    total += q * unit_price;
+
+    resolvedItems.push({ title, product_id: it.product_id || null, quantity: q, unit_price });
   }
 
   const order = await orderModel.createOrder({
@@ -35,19 +54,17 @@ async function createOrderFromChat({ jid, user_id = null, items = [], metadata =
     external_order_id
   });
 
-  // insert items
-  for (const it of items) {
+  for (const ri of resolvedItems) {
     await orderItemModel.createOrderItem({
       order_id: order.id,
-      product_id: it.product_id || null,
-      title: it.title || null,
-      quantity: it.quantity || 1,
-      unit_price: it.unit_price || 0,
-      metadata: it.metadata || {}
+      product_id: ri.product_id,
+      title: ri.title,
+      quantity: ri.quantity,
+      unit_price: ri.unit_price,
+      metadata: {}
     });
   }
 
-  // add initial status history
   await orderModel.updateOrderStatus(order.id, 'pending', 'Order created from chat');
 
   return order;
