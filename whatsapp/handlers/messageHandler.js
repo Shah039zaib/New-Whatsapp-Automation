@@ -17,6 +17,9 @@ async function onMessageUpsert(conn, m, accountId, logger) {
 
     emitter.emit("message", { accountId, message: parsed, raw: m });
 
+    // -----------------------------
+    // SAVE MEDIA IF EXISTS
+    // -----------------------------
     if (parsed.hasMedia) {
       try {
         const mediaInfo = await saveMedia(conn, parsed.raw, parsed.id || 'media');
@@ -25,6 +28,30 @@ async function onMessageUpsert(conn, m, accountId, logger) {
         logger.error({ err }, "media save failed");
       }
     }
+
+    // ---------------------------------------------------
+    // ⭐ PAYMENT SCREENSHOT DETECTION GOES EXACTLY HERE ⭐
+    // ---------------------------------------------------
+    if (parsed.hasMedia && parsed.mime?.startsWith("image")) {
+      try {
+        await conn.sendMessage(parsed.jid, {
+          text: "Screenshot mil gaya! Hum payment verify kar rahay hain. Shukriya."
+        });
+
+        // TODO: yaha hum order ko "awaiting_verification" mark karenge
+        // Example:
+        // await axios.post(`${process.env.BACKEND_INTERNAL_URL}/api/orders/update-payment-status`,
+        //   { jid: parsed.jid, status: "awaiting_verification" },
+        //   { headers: { "x-internal-secret": process.env.INTERNAL_SECRET } }
+        // );
+
+      } catch (err) {
+        logger.warn({ err: err?.message }, "Failed to send screenshot confirmation message");
+      }
+    }
+    // -------------------------
+    // END SCREENSHOT UNIT
+    // -------------------------
 
     const webhook = process.env.BACKEND_WEBHOOK_URL;
     if (webhook) {
@@ -52,7 +79,9 @@ async function onMessageUpsert(conn, m, accountId, logger) {
       const apiBase = process.env.BACKEND_PUBLIC_URL || "http://localhost:5000";
       const packages = await axios.get(`${apiBase}/api/packages/public/list`).then(r => r.data.rows).catch(()=>[]);
       if (packages && packages.length) {
-        packageText = packages.map(p => `• ${p.title} — ${p.currency} ${p.price}\n  Features: ${(p.features||[]).join(', ')}\n  Delivery: ${p.delivery_days} days\n`).join("\n");
+        packageText = packages.map(p =>
+          `• ${p.title} — ${p.currency} ${p.price}\n  Features: ${(p.features||[]).join(', ')}\n  Delivery: ${p.delivery_days} days\n`
+        ).join("\n");
       }
     } catch (err) {
       logger.warn("Failed to fetch packages for AI");
@@ -63,9 +92,8 @@ async function onMessageUpsert(conn, m, accountId, logger) {
     const lower = parsed.text.toLowerCase();
     const isConfirm = confirmationWords.some(w => lower.includes(w));
 
-    // conversation id
     const convId = jid;
-    // append user to context
+
     contextManager.appendMessage(convId, {
       role: "user",
       content: parsed.text,
@@ -74,7 +102,6 @@ async function onMessageUpsert(conn, m, accountId, logger) {
       timestamp: now
     });
 
-    // build AI prompt (includes packages)
     const finalPrompt = `
 You are a professional WhatsApp Sales Assistant for Shopify Store Development Services.
 
@@ -86,16 +113,17 @@ Customer message: "${parsed.text}"
 Tasks:
 1) Understand user's need.
 2) Recommend best package (Basic/Standard/Premium).
-3) If user confirms purchase (yes, theek hai, confirm, ok), output ONLY a single line with format:
-  ORDER_INTENT::<PACKAGE_SLUG_OR_TITLE_IN_PLAIN_TEXT>
-If user is not confirming, respond normally as sales assistant.
-Be concise and friendly.
+3) If user confirms purchase (yes, theek hai, confirm, ok), output ONLY:
+   ORDER_INTENT::<PACKAGE_TITLE>
 `;
 
-    // call AI
     let aiResp;
     try {
-      aiResp = await getAIResponse({ prompt: finalPrompt, conversationId: convId, metadata: { jid, accountId } });
+      aiResp = await getAIResponse({
+        prompt: finalPrompt,
+        conversationId: convId,
+        metadata: { jid, accountId }
+      });
     } catch (e) {
       logger.error({ err: e }, "AI provider error");
       return;
@@ -106,7 +134,6 @@ Be concise and friendly.
       return;
     }
 
-    // Save assistant to context
     contextManager.appendMessage(convId, {
       role: "assistant",
       content: aiResp.text,
@@ -115,32 +142,29 @@ Be concise and friendly.
       timestamp: Date.now()
     });
 
-    // Check AI for explicit ORDER_INTENT token
     const aiText = aiResp.text.trim();
     const orderIntentMatch = aiText.match(/ORDER_INTENT::(.+)/i);
     let detectedPackage = null;
+
     if (orderIntentMatch) {
       detectedPackage = orderIntentMatch[1].trim();
       logger.info({ jid, detectedPackage }, "AI detected ORDER_INTENT");
     } else if (isConfirm) {
-      // If AI didn't return structured token but user typed confirm, attempt to extract package by asking AI small extractor
       try {
-        const extractorPrompt = `User message: "${parsed.text}"\nBased on conversation context, which package did the user confirm? Reply with package title or "NO_PACKAGE".`;
-        const ext = await getAIResponse({ prompt: extractorPrompt, conversationId: convId, metadata: { jid, accountId } });
+        const extractorPrompt = `User message: "${parsed.text}". Identify confirmed package or reply "NO_PACKAGE".`;
+        const ext = await getAIResponse({
+          prompt: extractorPrompt, conversationId: convId, metadata: { jid, accountId }
+        });
         const extText = (ext && ext.text) ? ext.text.trim() : "";
-        if (extText && /NO_PACKAGE/i.test(extText) === false) {
+        if (extText && !/NO_PACKAGE/i.test(extText)) {
           detectedPackage = extText;
-          logger.info({ jid, detectedPackage }, "Extractor found package on confirmation");
         }
-      } catch (e) {
-        logger.warn({ err: e?.message }, "Package extractor failed");
-      }
+      } catch {}
     }
 
-    // If we detected package, call internal order API (safe, idempotent)
+    // Auto order creation
     if (detectedPackage) {
       try {
-        // call backend internal endpoint (requires INTERNAL_SECRET header)
         const internalBase = process.env.BACKEND_INTERNAL_URL || process.env.BACKEND_PUBLIC_URL || "http://localhost:5000";
         const resp = await axios.post(
           `${internalBase}/api/orders/from-chat-internal`,
@@ -151,28 +175,21 @@ Be concise and friendly.
           },
           { headers: { 'x-internal-secret': process.env.INTERNAL_SECRET } , timeout: 15000 }
         ).catch(e => ({ error: e }));
+
         if (resp && !resp.error && resp.data && resp.data.ok) {
           const orderId = resp.data.order?.id || resp.data.orderId || 'N/A';
-          // send confirmation to user BEFORE normal AI reply (or after) — we append a short confirmation
-          try {
-            await conn.sendMessage(jid, { text: `Aapka order create ho gaya. Order ID: ${orderId}. Hum jaldi payment details bhej rahay hain.` });
-          } catch (e) {
-            logger.warn({ err: e?.message }, "failed to send order confirmation");
-          }
-        } else {
-          logger.warn({ jid, resp }, "internal order create failed");
+          await conn.sendMessage(jid, {
+            text: `Aapka order create ho gaya. Order ID: ${orderId}. Hum jaldi payment details bhej rahay hain.`
+          });
         }
       } catch (err) {
         logger.error({ err }, "auto-order call failed");
       }
     }
 
-    // Typing simulation & send AI reply (original reply)
     try {
       await simulateTyping(conn, jid, aiResp.text, { baseDelayMs: 800, perCharMs: 18 });
-    } catch (e) {
-      logger.warn({ err: e?.message }, "simulateTyping failed");
-    }
+    } catch {}
 
     try {
       await conn.sendMessage(jid, { text: aiResp.text });
