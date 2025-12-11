@@ -17,7 +17,6 @@ const chatRoutes = require('./routes/chat.routes');
 const orderRoutes = require('./routes/order.routes');
 const packageRoutes = require('./routes/package.routes');
 
-
 const app = express();
 
 // middlewares
@@ -47,6 +46,8 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/chats', chatRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/packages', packageRoutes);
+app.use('/api/payment-settings', require('./routes/paymentSettings.routes'));
+
 
 // 404
 app.use((req, res) => {
