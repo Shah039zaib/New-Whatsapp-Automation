@@ -1,19 +1,17 @@
 // backend/src/routes/order.routes.js
 const express = require('express');
 const router = express.Router();
-const { createFromChat, setStatus, getOne, list } = require('../controllers/order.controller');
+const { createFromChat, createFromChatInternal, setStatus, getOne, list } = require('../controllers/order.controller');
 const { authMiddleware } = require('../middlewares/auth.middleware');
+const internalAuth = require('../middlewares/internalAuth.middleware');
 
-// create order from chat (can be called by admin or WA/AI via API)
+// Admin routes (require auth)
 router.post('/from-chat', authMiddleware, createFromChat);
-
-// set/change order status
 router.post('/:orderId/status', authMiddleware, setStatus);
-
-// get order
 router.get('/:orderId', authMiddleware, getOne);
-
-// list orders
 router.get('/', authMiddleware, list);
+
+// Internal route (called from WA server) — secure via internal secret
+router.post('/from-chat-internal', internalAuth, createFromChatInternal);
 
 module.exports = router;
