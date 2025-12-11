@@ -4,12 +4,27 @@ const orderService = require('../services/order.service');
 
 async function createFromChat(req, res, next) {
   try {
+    // admin-create via auth middleware (existing)
     const { jid, user_id, items, metadata, external_order_id } = req.body;
     if (!jid || !Array.isArray(items) || items.length === 0) {
       return apiResponse.error(res, 'jid and items required', 400);
     }
     const order = await orderService.createOrderFromChat({ jid, user_id, items, metadata, external_order_id });
     return apiResponse.ok(res, { order });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// Internal endpoint (called by WA service) — protected by x-internal-secret
+async function createFromChatInternal(req, res, next) {
+  try {
+    const { jid, items, metadata, external_order_id } = req.body;
+    if (!jid || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ ok: false, error: 'jid and items required' });
+    }
+    const order = await orderService.createOrderFromChat({ jid, items, metadata, external_order_id });
+    return res.json({ ok: true, order });
   } catch (err) {
     next(err);
   }
@@ -48,4 +63,4 @@ async function list(req, res, next) {
   }
 }
 
-module.exports = { createFromChat, setStatus, getOne, list };
+module.exports = { createFromChat, createFromChatInternal, setStatus, getOne, list };
