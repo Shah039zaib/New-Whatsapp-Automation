@@ -14,6 +14,8 @@ const whatsappRoutes = require('./routes/whatsapp.routes');
 const paymentRoutes = require('./routes/payment.routes');
 const analyticsRoutes = require('./routes/analytics.routes');
 const chatRoutes = require('./routes/chat.routes');
+const orderRoutes = require('./routes/order.routes');
+
 
 const app = express();
 
@@ -42,6 +44,7 @@ app.use('/api/whatsapp', whatsappRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/chats', chatRoutes);
+app.use('/api/orders', orderRoutes);
 
 // 404
 app.use((req, res) => {
