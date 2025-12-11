@@ -13,6 +13,7 @@ const aiRoutes = require('./routes/ai.routes');
 const whatsappRoutes = require('./routes/whatsapp.routes');
 const paymentRoutes = require('./routes/payment.routes');
 const analyticsRoutes = require('./routes/analytics.routes');
+const chatRoutes = require('./routes/chat.routes');
 
 const app = express();
 
@@ -40,6 +41,7 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/chats', chatRoutes);
 
 // 404
 app.use((req, res) => {
