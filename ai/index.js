@@ -3,6 +3,7 @@ require('dotenv').config();
 const AiRouter = require('./router/aiRouter');
 const ContextManager = require('./context/contextManager');
 const { aiErrorHandler } = require('./utils/aiErrorHandler');
+const axios = require('axios');  // ⭐ important for package fetch
 
 const router = new AiRouter({
   providers: ['claude','gemini','groq','cohere'],
@@ -21,22 +22,73 @@ const contextManager = new ContextManager({
  */
 async function getAIResponse({ provider, prompt, conversationId = null, metadata = {} }) {
   try {
-    // ensure prompt is string
     if (!prompt || typeof prompt !== 'string') throw new Error('Prompt required and must be a string');
 
-    // select provider (explicit or routed)
+    // -------------------------------
+    // ⭐ FETCH SERVICE PACKAGES (SAFE)
+    // -------------------------------
+    let packageText = "No packages found.";
+    try {
+      const apiBase = process.env.BACKEND_PUBLIC_URL || "http://localhost:5000";
+      const packages = await axios
+        .get(`${apiBase}/api/packages/public/list`)
+        .then(r => r.data.rows)
+        .catch(() => []);
+
+      if (packages && packages.length > 0) {
+        packageText = packages
+          .map(p =>
+            `• ${p.title} — ${p.currency} ${p.price}\n  Features: ${(p.features || []).join(', ')}\n  Delivery: ${p.delivery_days} days\n`
+          )
+          .join("\n");
+      }
+    } catch (err) {
+      console.log("AI Package Load Failed:", err.message);
+    }
+
+    // --------------------------------------------------------
+    // ⭐ BUILD FINAL AI PROMPT (Your Shopify Sales Assistant AI)
+    // --------------------------------------------------------
+    const enhancedPrompt = `
+You are a professional WhatsApp Sales Assistant for Shopify Store Development Services.
+
+Below are the currently available service packages:
+
+${packageText}
+
+Customer message:
+"${prompt}"
+
+Your Responsibilities:
+1. Identify customer's needs.
+2. Recommend the best Shopify package.
+3. Provide price clearly.
+4. Ask if customer wants to proceed.
+5. If the customer says "yes", "haan", "theek hai", "confirm", "ok", "order", we will create the order internally.
+6. Stay concise, professional & friendly.
+`;
+
+    // -------------------------------
+    // ⭐ PROVIDER SELECTION
+    // -------------------------------
     const selected = provider || router.selectProvider();
 
-    // load context for conversation
+    // load context
     const context = conversationId ? contextManager.getContext(conversationId) : null;
 
-    // call through router (handles provider call, retries, rate-limits)
-    const resp = await router.callProvider(selected, { prompt, context, metadata });
+    // ------------------------------------------
+    // ⭐ CALL ACTUAL PROVIDER WITH ENHANCED PROMPT
+    // ------------------------------------------
+    const resp = await router.callProvider(selected, {
+      prompt: enhancedPrompt,
+      context,
+      metadata
+    });
 
-    // store to context manager if conversationId present
+    // Save assistant message into context
     if (conversationId) {
       contextManager.appendMessage(conversationId, {
-        role: 'assistant',
+        role: "assistant",
         provider: selected,
         content: resp.text,
         usage: resp.usage || null,
@@ -45,8 +97,8 @@ async function getAIResponse({ provider, prompt, conversationId = null, metadata
     }
 
     return { ...resp, provider: selected };
+
   } catch (err) {
-    // convert errors to consistent format
     throw aiErrorHandler(err);
   }
 }
